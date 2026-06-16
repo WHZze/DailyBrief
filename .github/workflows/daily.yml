@@ -247,24 +247,17 @@ jobs:
           keep_files: false  # we restored everything above, so a clean publish is fine
           commit_message: 'daily: report for ${{ github.run_id }}'
 
-      # Compute the default GitHub Pages URL for the push notification.
-      - name: Compute report URL
-        id: url
-        if: success()
-        env:
-          REPO: ${{ github.repository }}
-        run: |
-          OWNER="${GITHUB_REPOSITORY_OWNER}"
-          REPO_NAME="${REPO#*/}"
-          echo "url=https://${OWNER}.github.io/${REPO_NAME}/" >> "$GITHUB_OUTPUT"
-
-      # Send push notification (e.g. Bark for iOS).
+      # Send push notification (Bark for iOS).
       # No-op unless PUSH_BARK_KEY is set in GitHub Secrets.
+      # The notification body includes an inline report summary so you can
+      # read key info without opening any link. The tappable URL uses
+      # raw.githubusercontent.com (accessible from mainland China, unlike
+      # github.io Pages IPs which are blocked).
       - name: Send push notification
         if: success()
         env:
           PUSH_BARK_KEY: ${{ secrets.PUSH_BARK_KEY }}
-          PUSH_REPORT_URL: ${{ vars.PUSH_REPORT_URL || steps.url.outputs.url }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          REPORT_TZ: ${{ vars.REPORT_TZ }}
+          REPORT_LOCALE: ${{ vars.REPORT_LOCALE || 'zh' }}
         run: node scripts/notify.mjs

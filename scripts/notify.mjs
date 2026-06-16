@@ -12,12 +12,10 @@
  *
  * Configuration (in .env.local — gitignored, or GitHub Actions secrets/vars):
  *   PUSH_BARK_KEY=<device-key>      # from the Bark iOS app home screen
- *   PUSH_REPORT_URL=<https://...>   # optional; the tappable URL in the notification
- *                                     — defaults to GitHub Pages URL in CI
- *                                     — omitted from push if neither is set
+ *   PUSH_REPORT_URL=<https://...>   # optional; explicit tappable URL override
  *
- * The Bark API is a single HTTP GET — no auth header, no JSON body:
- *   https://api.day.app/{key}/{title}/{body}?url={clickURL}
+ * The notification body contains an inline summary of the report (headlines +
+ * overview), so you get the key info without needing to open the link.
  *
  * No-op if PUSH_BARK_KEY is not configured.
  */
@@ -30,18 +28,13 @@ import path from "node:path";
 
 const barkKey = process.env.PUSH_BARK_KEY;
 if (!barkKey) {
-  // Quietly skip — most users won't configure this. It's not an error
-  // to leave it unset; the report exists on disk / gh-pages regardless.
   console.log("[notify] PUSH_BARK_KEY not set — skipping push notification");
   process.exit(0);
 }
 
-// Resolve the date of the report we're notifying about.
-//   - explicit arg wins (e.g. `node scripts/notify.mjs 2026-05-20`)
-//   - otherwise: today's date in REPORT_TZ (or system local if unset).
-//     If that directory doesn't exist yet, fall back to the most recent
-//     <YYYY-MM-DD>/ on disk so the script does something useful when
-//     called manually before today's pipeline finishes.
+const isEn = process.env.REPORT_LOCALE === "en";
+
+// ── Date resolution ────────────────────────────────────────────────────────
 const dateArg = process.argv[2];
 const todayLocal = new Intl.DateTimeFormat("en-CA", {
   timeZone: process.env.REPORT_TZ?.trim() || undefined,
@@ -50,18 +43,21 @@ const todayLocal = new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 }).format(new Date());
 
-function reportDirExists(d) {
-  return fs.existsSync(path.join("daily_reports", d));
+function reportDir(d) {
+  return path.join("daily_reports", d);
+}
+function jsonPath(d) {
+  return path.join(reportDir(d), `${d}.json`);
 }
 
 let date;
 if (dateArg) {
   date = dateArg;
-  if (!reportDirExists(date)) {
+  if (!fs.existsSync(reportDir(date))) {
     console.error(`[notify] no report directory: daily_reports/${date}`);
     process.exit(1);
   }
-} else if (reportDirExists(todayLocal)) {
+} else if (fs.existsSync(reportDir(todayLocal))) {
   date = todayLocal;
 } else {
   const dirs = fs
@@ -76,33 +72,76 @@ if (dateArg) {
   console.log(`[notify] today (${todayLocal}) not generated yet, using latest: ${date}`);
 }
 
-// Resolve the report URL that the notification links to.
-// Order: explicit PUSH_REPORT_URL env var → auto-derive from GH env in CI → skip URL parameter.
-let reportUrl = process.env.PUSH_REPORT_URL || "";
+// ── Build inline summary from report JSON ───────────────────────────────────
+let bodyText = "";
+const localJson = jsonPath(date);
+if (fs.existsSync(localJson)) {
+  try {
+    const report = JSON.parse(fs.readFileSync(localJson, "utf8"));
+    const parts = [];
 
-if (!reportUrl) {
-  // In GitHub Actions, GITHUB_REPOSITORY is "owner/repo".
-  // The default Pages URL for a user/org repo is https://<owner>.github.io/<repo>/
-  const repo = process.env.GITHUB_REPOSITORY;
-  const owner = process.env.GITHUB_REPOSITORY_OWNER;
-  if (repo && owner) {
-    const repoName = repo.slice(repo.indexOf("/") + 1);
-    reportUrl = `https://${owner}.github.io/${repoName}/`;
+    // Hero headline
+    if (report.hero_headline) {
+      parts.push(isEn ? `📌 ${report.hero_headline}` : `📌 ${report.hero_headline}`);
+    }
+
+    // Daily overview (the key section — trim to ~300 chars)
+    if (report.daily_overview) {
+      let ov = report.daily_overview;
+      if (ov.length > 350) ov = ov.slice(0, 350) + "…";
+      parts.push(ov);
+    }
+
+    // Top briefs from each category (1-2 each)
+    for (const cat of ["tech_briefs", "finance_briefs", "politics_briefs"]) {
+      const briefs = report[cat];
+      if (!Array.isArray(briefs) || briefs.length === 0) continue;
+      const label =
+        cat === "tech_briefs" ? (isEn ? "💻 Tech" : "💻 科技")
+        : cat === "finance_briefs" ? (isEn ? "💰 Finance" : "💰 财经")
+        : (isEn ? "🌍 World" : "🌍 时政");
+      const items = briefs.slice(0, 2).map((b) => `· ${b.summary || b.headline || "?"}`);
+      parts.push(`${label}\n${items.join("\n")}`);
+    }
+
+    bodyText = parts.join("\n\n");
+  } catch (err) {
+    console.warn(`[notify] failed to read report JSON: ${err.message} — falling back to plain text`);
   }
 }
 
-// Build the Bark API URL.
-// Title and body are path segments — URL-encode to handle Chinese characters.
-const title = process.env.REPORT_LOCALE === "en" ? "Daily Brief Ready" : "今日简报已生成";
-const bodySuffix = date;
+// Fallback: plain date-only body if JSON couldn't be read
+if (!bodyText) {
+  bodyText = isEn
+    ? `Daily Brief for ${date} is ready. Tap to read.`
+    : `${date} 每日简报已生成，点击查看。`;
+}
+// Append a hint about tapping
+bodyText += isEn ? "\n\n👆 Tap to read full report" : "\n\n👆 轻点查看完整报告";
+
+// ── Resolve tappable URL ────────────────────────────────────────────────────
+// Priority: explicit PUSH_REPORT_URL → raw.githubusercontent.com in CI → none
+let reportUrl = process.env.PUSH_REPORT_URL || "";
+
+if (!reportUrl) {
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (repo) {
+    // raw.githubusercontent.com is NOT blocked in mainland China (unlike
+    // github.io Pages IPs). The report is a self-contained HTML with inline
+    // CSS/JS — renders perfectly when served raw.
+    reportUrl = `https://raw.githubusercontent.com/${repo}/gh-pages/${date}/${date}.html`;
+  }
+}
+
+// ── Build and send Bark push ────────────────────────────────────────────────
+const title = isEn ? `📰 Daily Brief · ${date}` : `📰 每日简报 · ${date}`;
 const barkBase = `https://api.day.app/${encodeURIComponent(barkKey)}`;
-const barkPath = `/${encodeURIComponent(title)}/${encodeURIComponent(bodySuffix)}`;
+const barkPath = `/${encodeURIComponent(title)}/${encodeURIComponent(bodyText)}`;
 let barkUrl = `${barkBase}${barkPath}`;
 if (reportUrl) {
   barkUrl += `?url=${encodeURIComponent(reportUrl)}`;
 }
 
-// Send the push notification. Node 18+ has stable global fetch.
 try {
   const resp = await fetch(barkUrl);
   const respBody = await resp.text();
@@ -112,6 +151,5 @@ try {
     console.log(`[notify] Bark push sent for ${date}${reportUrl ? ` → ${reportUrl}` : ""}`);
   }
 } catch (err) {
-  // Non-fatal: the report is on disk / gh-pages regardless.
   console.warn(`[notify] Bark push failed (fetch error): ${err.message}`);
 }
