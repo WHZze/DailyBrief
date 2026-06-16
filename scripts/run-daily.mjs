@@ -80,6 +80,21 @@ child.on("close", (code) => {
       );
     }
 
+    // Send push notification (no-op if PUSH_BARK_KEY not set).
+    // Non-fatal — push failure doesn't affect the report on disk.
+    fs.appendFileSync(logFile, `[${now()}] notifying…\n`);
+    const notifyResult = spawnSyncShim("node", ["scripts/notify.mjs"], {
+      cwd: projectRoot,
+    });
+    if (notifyResult.status === 0) {
+      fs.appendFileSync(logFile, `[${now()}] notify OK\n`);
+    } else {
+      fs.appendFileSync(
+        logFile,
+        `[${now()}] notify FAILED (exit ${notifyResult.status}) — non-fatal\n`,
+      );
+    }
+
     // Detached so we don't block on Chrome's lifetime. Errors here are
     // cosmetic — the report exists on disk regardless.
     const opener = spawn("npm", ["run", "open"], {

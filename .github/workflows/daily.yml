@@ -7,6 +7,7 @@ name: Daily Brief
 #   2. Settings → Pages → Build & deployment → Source: "Deploy from a branch" → gh-pages / root
 #   3. Settings → Secrets and variables → Actions:
 #        - Secrets: ANTHROPIC_API_KEY (or OPENAI / DEEPSEEK / MINIMAX / ZHIPU as you prefer)
+#                 PUSH_BARK_KEY (optional — Bark iOS push notification)
 #        - Variables (all optional, sensible defaults provided):
 #            LLM_BACKEND     anthropic | openai | deepseek | minimax | zhipu    (default: anthropic)
 #            LLM_MODEL       e.g. claude-sonnet-4-6 / gpt-4o-mini       (backend default if unset)
@@ -16,6 +17,7 @@ name: Daily Brief
 #                            examples: "8" / "8,18" / "0,6,12,18"
 #            REPORT_DAYS     day-of-week filter (cron-style 0-6 SUN=0)  (default: * — every day)
 #                            examples: "*" / "1-5" (weekdays) / "1,3,5" (MWF)
+#            PUSH_REPORT_URL URL included in push notification          (auto-derived in CI)
 #   4. Trigger once manually from Actions tab to seed gh-pages.
 #
 # After first successful run your report is live at:
@@ -244,3 +246,25 @@ jobs:
           publish_branch: gh-pages
           keep_files: false  # we restored everything above, so a clean publish is fine
           commit_message: 'daily: report for ${{ github.run_id }}'
+
+      # Compute the default GitHub Pages URL for the push notification.
+      - name: Compute report URL
+        id: url
+        if: success()
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          REPO_NAME="${REPO#*/}"
+          echo "url=https://${OWNER}.github.io/${REPO_NAME}/" >> "$GITHUB_OUTPUT"
+
+      # Send push notification (e.g. Bark for iOS).
+      # No-op unless PUSH_BARK_KEY is set in GitHub Secrets.
+      - name: Send push notification
+        if: success()
+        env:
+          PUSH_BARK_KEY: ${{ secrets.PUSH_BARK_KEY }}
+          PUSH_REPORT_URL: ${{ vars.PUSH_REPORT_URL || steps.url.outputs.url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: node scripts/notify.mjs

@@ -12,6 +12,7 @@
     "sources": "tsx scripts/sources.ts",
     "sources:check": "tsx scripts/sources.ts check",
     "deploy": "node scripts/deploy.mjs",
+    "notify": "node scripts/notify.mjs",
     "build-site": "node scripts/build-site.mjs",
     "open": "node scripts/open-report.mjs"
   },
