@@ -126,10 +126,10 @@ let reportUrl = process.env.PUSH_REPORT_URL || "";
 if (!reportUrl) {
   const repo = process.env.GITHUB_REPOSITORY;
   if (repo) {
-    // raw.githubusercontent.com is NOT blocked in mainland China (unlike
-    // github.io Pages IPs). The report is a self-contained HTML with inline
-    // CSS/JS — renders perfectly when served raw.
-    reportUrl = `https://raw.githubusercontent.com/${repo}/gh-pages/${date}/${date}.html`;
+    // Route through ghfast.top — a GitHub raw-content proxy accessible
+    // from mainland China where github.io IPs are blocked.
+    const rawUrl = `https://raw.githubusercontent.com/${repo}/gh-pages/${date}/${date}.html`;
+    reportUrl = `https://ghfast.top/${rawUrl}`;
   }
 }
 
