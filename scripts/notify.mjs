@@ -133,17 +133,26 @@ if (!reportUrl) {
   }
 }
 
-// ── Build and send Bark push ────────────────────────────────────────────────
+// ── Send via Bark POST API ──────────────────────────────────────────────────
+// The GET API (/key/title/body) has URL length limits (~4KB). We use the
+// POST endpoint so the inline summary can be rich without hitting 431 errors.
 const title = isEn ? `📰 Daily Brief · ${date}` : `📰 每日简报 · ${date}`;
-const barkBase = `https://api.day.app/${encodeURIComponent(barkKey)}`;
-const barkPath = `/${encodeURIComponent(title)}/${encodeURIComponent(bodyText)}`;
-let barkUrl = `${barkBase}${barkPath}`;
-if (reportUrl) {
-  barkUrl += `?url=${encodeURIComponent(reportUrl)}`;
-}
+
+const payload = {
+  device_key: barkKey,
+  title,
+  body: bodyText,
+  group: "DailyBrief",
+  level: "timeSensitive",
+};
+if (reportUrl) payload.url = reportUrl;
 
 try {
-  const resp = await fetch(barkUrl);
+  const resp = await fetch("https://api.day.app/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    body: JSON.stringify(payload),
+  });
   const respBody = await resp.text();
   if (!resp.ok) {
     console.warn(`[notify] Bark push failed (HTTP ${resp.status}): ${respBody.slice(0, 200)}`);
