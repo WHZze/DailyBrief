@@ -25,6 +25,7 @@ config({ path: ".env.local", quiet: true });
 
 import fs from "node:fs";
 import path from "node:path";
+import { getExtras } from "./content-extras.mjs";
 
 const barkKey = process.env.PUSH_BARK_KEY;
 if (!barkKey) {
@@ -118,6 +119,14 @@ if (!bodyText) {
 }
 // Append a hint about tapping
 bodyText += isEn ? "\n\n👆 Tap to read full report" : "\n\n👆 轻点查看完整报告";
+
+// ── Fetch extra content (weather, quote, history) ──────────────────────────
+// Best-effort — failures are non-fatal, notification degrades gracefully.
+console.log("[notify] fetching extras…");
+const extras = await getExtras();
+if (extras) {
+  bodyText += "\n\n" + extras;
+}
 
 // ── Resolve tappable URL ────────────────────────────────────────────────────
 // Priority: explicit PUSH_REPORT_URL → raw.githubusercontent.com in CI → none
