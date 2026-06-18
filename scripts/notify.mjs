@@ -81,28 +81,65 @@ if (fs.existsSync(localJson)) {
     const report = JSON.parse(fs.readFileSync(localJson, "utf8"));
     const parts = [];
 
-    // Hero headline
+    // 1. Hero headline
     if (report.hero_headline) {
-      parts.push(isEn ? `📌 ${report.hero_headline}` : `📌 ${report.hero_headline}`);
+      parts.push(`📌 ${report.hero_headline}`);
     }
 
-    // Daily overview (the key section — trim to ~300 chars)
+    // 2. Daily overview
     if (report.daily_overview) {
       let ov = report.daily_overview;
-      if (ov.length > 350) ov = ov.slice(0, 350) + "…";
+      if (ov.length > 400) ov = ov.slice(0, 400) + "…";
       parts.push(ov);
     }
 
-    // Top briefs from each category (1-2 each)
-    for (const cat of ["tech_briefs", "finance_briefs", "politics_briefs"]) {
+    // 3. News briefs — tech, finance, politics
+    const catLabels = {
+      tech_briefs: "💻 科技",
+      finance_briefs: "💰 财经",
+      politics_briefs: "🌍 时政",
+    };
+    for (const [cat, label] of Object.entries(catLabels)) {
       const briefs = report[cat];
       if (!Array.isArray(briefs) || briefs.length === 0) continue;
-      const label =
-        cat === "tech_briefs" ? (isEn ? "💻 Tech" : "💻 科技")
-        : cat === "finance_briefs" ? (isEn ? "💰 Finance" : "💰 财经")
-        : (isEn ? "🌍 World" : "🌍 时政");
-      const items = briefs.slice(0, 2).map((b) => `· ${b.summary || b.headline || "?"}`);
+      const items = briefs.slice(0, 2).map(
+        (b) => `· ${b.summary || b.headline || "?"}`
+      );
       parts.push(`${label}\n${items.join("\n")}`);
+    }
+
+    // 4. Trading / market signals
+    const trading = report.trading;
+    if (trading) {
+      const watchlist = trading.watchlist;
+      if (Array.isArray(watchlist) && watchlist.length > 0) {
+        // Pick key tickers: US majors + crypto + China
+        const keySymbols = new Set([
+          "SPY", "QQQ", "NVDA", "AAPL", "TSLA",
+          "BTC", "ETH", "BABA", "0700.HK",
+        ]);
+        const highlights = watchlist
+          .filter((t) => keySymbols.has(t.symbol))
+          .map((t) => {
+            const emoji = t.stance?.includes("上行") ? "🟢"
+              : t.stance?.includes("下行") ? "🔴" : "⚪";
+            return `${emoji} ${t.display_name || t.symbol}: ${t.stance || "—"}`;
+          });
+        if (highlights.length > 0) {
+          parts.push(`📈 市场信号\n${highlights.join("\n")}`);
+        }
+        // Add crypto fear & greed if available
+        const fg = trading.crypto_fear_greed;
+        if (fg && fg.value != null) {
+          const fgEmoji = fg.value > 60 ? "🟢" : fg.value > 40 ? "⚪" : "🔴";
+          parts.push(`🪙 加密恐慌贪婪指数: ${fgEmoji} ${fg.value} (${fg.classification || ""})`);
+        }
+      }
+    }
+
+    // 5. Editor's note / global analysis
+    if (report.editor_note) {
+      parts.push(`🧠 全球观察\n${report.editor_note}`);
     }
 
     bodyText = parts.join("\n\n");
@@ -117,16 +154,19 @@ if (!bodyText) {
     ? `Daily Brief for ${date} is ready. Tap to read.`
     : `${date} 每日简报已生成，点击查看。`;
 }
-// Append a hint about tapping
-bodyText += isEn ? "\n\n👆 Tap to read full report" : "\n\n👆 轻点查看完整报告";
 
-// ── Fetch extra content (weather, quote, history) ──────────────────────────
+// ── Fetch extra content (sports, history, quote) ─────────────────────────
 // Best-effort — failures are non-fatal, notification degrades gracefully.
-console.log("[notify] fetching extras…");
+console.log("[notify] fetching extras (sports, history, quote)…");
 const extras = await getExtras();
 if (extras) {
   bodyText += "\n\n" + extras;
 }
+
+// Append tap hint at the very end
+bodyText += isEn
+  ? "\n\n👆 Tap to read full report with charts & images"
+  : "\n\n👆 轻点查看完整报告（含图表与图片）";
 
 // ── Resolve tappable URL ────────────────────────────────────────────────────
 // Priority: explicit PUSH_REPORT_URL → raw.githubusercontent.com in CI → none
