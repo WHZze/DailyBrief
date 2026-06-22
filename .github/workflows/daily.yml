@@ -253,6 +253,7 @@ jobs:
         if: success()
         env:
           PUSH_BARK_KEY: ${{ secrets.PUSH_BARK_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           REPORT_TZ: ${{ vars.REPORT_TZ }}
           REPORT_LOCALE: ${{ vars.REPORT_LOCALE || 'zh' }}
